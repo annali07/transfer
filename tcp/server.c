@@ -88,8 +88,7 @@ int receive_file(int client_sock) {
             return -1;
     }
 
-    for(int i = 0; i < 1000; ++i){
-
+    for(int i = 0; i < 10; ++i){
         long total_bytes_received = 0;
         int bytes_received = 0;
         while(total_bytes_received < file_size){

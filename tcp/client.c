@@ -4,8 +4,13 @@
 #include <unistd.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <time.h>
+#include "latency_helpers.h"
 
 #define PAGE_SIZE 4096 // 4 kB
+#define BILLION  1000000000L
+
+int g_file_size = 0; 
 
 int connect_to_server(const char* server_ip, int port){
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -26,69 +31,157 @@ int connect_to_server(const char* server_ip, int port){
     return sockfd;
 }
 
-int fill_buffer_with_file(uint8_t* buffer, long long int buf_size, const char* file_location){
-    FILE* f = fopen(file_location, "r"); 
-    if (f == NULL){
-        fprintf(stderr, "Error opening file\n");
+int validate_success_message(int sock) {
+    int32_t net_number;
+    if (recv(sock, &net_number, sizeof(net_number), 0) < 0) {
+        perror("Failed to receive success message\n");
         return -1;
     }
-    int elems_read = fread(buffer, sizeof(uint8_t), buf_size, f);
-    fclose(f);
-    if (elems_read == -1){
-        fprintf(stderr, "Error reading file\n");
-        return -1;
-    } 
-    if (elems_read != buf_size){
-        fprintf(stderr, "Insufficient data read from file\n");
+    int number = ntohl(net_number);
+    if (number != 6) {
+        perror("Failed to receive success message\n");
         return -1;
     }
-    return 0;
 }
 
-int loop_send(int fd, uint8_t* buf, long long int buf_size, int num_loops){
-    int elems_written = 0;
-    for (int i = 0; i < num_loops; i++){
-        for (int j = 0; j < buf_size/PAGE_SIZE; j++){
-            elems_written = write(fd, buf + (j * PAGE_SIZE), PAGE_SIZE);
-            if (elems_written == -1) {
-                fprintf(stderr, "%d", j);
-                fprintf(stderr, "Error sending data to server\n");
-                return -1;
-            }
-            if (elems_written != PAGE_SIZE){
-                fprintf(stderr, "%i %d %lld %d",i,  j, buf_size/PAGE_SIZE, elems_written);
-                fprintf(stderr, "Potential issue: didn't send PAGE_SIZE to server\n");
-            }
+int send_file(int sock, const char *file_path) {
+    FILE *file;
+    long file_size;
+    char *buffer;
+    // Open file
+    file = fopen(file_path, "rb");
+    if (file == NULL) {
+        perror("Cannot open file");
+        close(sock);
+        return -1;
+    }
+
+    // Get file size
+    fseek(file, 0L, SEEK_END);
+    file_size = ftell(file);
+    rewind(file);
+
+    // Check file size limit
+    if (file_size < 1024 || file_size > 1048576) {
+        fprintf(stderr, "File size is out of the expected range (1kB to 1024kB)\n");
+        fclose(file);
+        close(sock);
+        return -1;
+    }
+
+    // Send file size to the server
+    if (send(sock, &file_size, sizeof(file_size), 0) < 0) {
+        perror("Failed to send file size");
+        fclose(file);
+        close(sock);
+        return -1;
+    }
+
+    g_file_size = file_size;
+
+    // Allocate memory for file buffer
+    buffer = malloc(1024 * 1024);
+    if (!buffer) {
+        perror("Failed to allocate buffer");
+        fclose(file);
+        close(sock);
+        return -1;
+    }
+
+    // Send file data
+    long bytes_read;
+    while ((bytes_read = fread(buffer, 1, PAGE_SIZE, file)) > 0) {
+        if (send(sock, buffer, bytes_read, 0) < 0) {
+            perror("Failed to send file data");
+            free(buffer);
+            fclose(file);
+            close(sock);
+            return -1;
         }
     }
+    if (validate_success_message(sock) < 0) {
+        close(sock);
+        return -1;
+    }
+
+    free(buffer);
+    fclose(file);
+    printf("File sent successfully.\n");
     return 0;
 }
 
 int main(int argc, const char** argv){
-    if (argc != 5){
-        fprintf(stderr, "invalid arguments: must be server ip, server port, number of loops, file location\n");
+    struct timespec start, stop;
+    double latency, total_latency;
+    double *latencies;
+    int test_rounds = 10;
+    int result = 0;
+    
+    if (argc != 4){
+        fprintf(stderr, "invalid arguments: must be server ip, server port, file location\n");
         exit(1);
     }
     const char* SERVER_IP = argv[1];
     char** temp = NULL;
     int SERVER_PORT = strtol(argv[2], temp, 10);
-    int num_loops = strtol(argv[3], temp, 10);
-    const char* file_location = argv[4];
+    const char* file_location = argv[3];
     
     int sockfd =  connect_to_server(SERVER_IP, SERVER_PORT);
     if (sockfd == -1){return -1;}
-    
-    long long int buf_size = 4096; // 1 gigabyte
-    uint8_t* buf = malloc(buf_size); // I had an issue on my machine with more than 1 gig
-    int err = fill_buffer_with_file(buf, buf_size, file_location);
-    if (err) {
-        free(buf);
-        return -1;
-    } 
-    //maybe threadify later
-    err = loop_send(sockfd, buf, buf_size, num_loops);
-    free(buf);
-    if (err) {return -1;}
+
+    // Start Timing 
+    total_latency = 0;
+    latencies = malloc(sizeof(double) * test_rounds);
+    for (size_t i = 0; i != test_rounds; i++) {
+	     latencies[i] = 0;
+	}
+
+    for (size_t i = 0; i < test_rounds; i++) {
+		// sends file
+		if(clock_gettime(CLOCK_REALTIME, &start) == -1) {
+			perror("clock gettime");
+			return -1;
+		}
+		result = send_file(sockfd, file_location);
+		
+        if (result < 0) {
+			perror("fail");
+			exit(0);
+		}
+        
+
+		if(clock_gettime( CLOCK_REALTIME, &stop) == -1) {
+			perror("clock gettime");
+			return -1;
+		}
+
+		latency = (stop.tv_sec - start.tv_sec) * (double)BILLION
+			     + (double)(stop.tv_nsec - start.tv_nsec);
+		latency = latency / 1000.0;
+
+		latencies[i] = latency;
+		total_latency += latency;
+	}
+
+	Statistics LatencyStats;
+        Percentiles PercentileStats;
+        GetStatistics(latencies, (size_t)test_rounds, &LatencyStats, &PercentileStats);
+        printf(
+                "Result for %d requests of %d bytes (%.2lf seconds): %.2lf RPS, Min: %.2lf, Max: %.2lf, 50th: %.2lf, 90th: %.2lf, 99th: %.2lf, 99.9th: %.2lf, 99.99th: %.2lf, StdErr: %.2lf\n",
+                test_rounds,
+                g_file_size,
+                (total_latency / 1000000),
+                (test_rounds / total_latency * 1000000),
+                LatencyStats.Min,
+                LatencyStats.Max,
+                PercentileStats.P50,
+                PercentileStats.P90,
+                PercentileStats.P99,
+                PercentileStats.P99p9,
+                PercentileStats.P99p99,
+                LatencyStats.StandardError);
+
+	free(latencies);
+    close(sockfd);
     return 0;
-    
 }
