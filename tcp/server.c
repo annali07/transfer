@@ -67,17 +67,18 @@ int send_success_message(int client_sock) {
 }
 
 int receive_file(int client_sock) {
-	struct timespec start, end;
+        struct timespec start, end;
     int64_t elapsed_time_ns = 0;
 
-    long file_size;
+    long file_size = 0;
     if (read(client_sock, &file_size, sizeof(file_size)) < 0) {
         perror("Failed to read file size");
         return -1;
     }
 
-    if (file_size < 1024 || file_size > MAX_FILE_SIZE) {
-        fprintf(stderr, "Received file size is out of the expected range (1kB to 1024kB)\n");
+    if (file_size < 8 || file_size > MAX_FILE_SIZE) {
+        printf("file size %ld\n", file_size);
+            fprintf(stderr, "Received file size is out of the expected range (1kB to 1024kB)\n");
         return -1;
     }
     printf("Received file size: %ld\n", file_size);
@@ -88,7 +89,7 @@ int receive_file(int client_sock) {
             return -1;
     }
 
-    for(int i = 0; i < 10; ++i){
+    for(int i = 0; i < 1000; ++i){
         long total_bytes_received = 0;
         int bytes_received = 0;
         while(total_bytes_received < file_size){
@@ -104,15 +105,21 @@ int receive_file(int client_sock) {
                 return -1;
             }
             total_bytes_received += bytes_received;
+            //printf("%ld\n", total_bytes_received);
         }
+        //printf("final bytes %ld\n", total_bytes_received);
 
         if (total_bytes_received != file_size) {
             fprintf(stderr, "Mismatch in the file size received and expected\n");
+                return -1;
         } else {
-            // printf("File received successfully, total bytes: %ld\n", total_bytes_received);
+            //printf("File received successfully, total bytes: %ld\n", total_bytes_received);
             if (send_success_message(client_sock) < 0) {
                 return -1;  // handle error appropriately
             }
+        }
+        if (i%10 == 0){
+                printf("%d/100\n", i/10);
         }
     }
     free(buffer);
