@@ -66,8 +66,8 @@ int send_success_message(int client_sock) {
     return 0;
 }
 
-int receive_file(int client_sock) {
-        struct timespec start, end;
+int receive_file(int client_sock, int total_requests) {
+    struct timespec start, end;
     int64_t elapsed_time_ns = 0;
 
     long file_size = 0;
@@ -89,7 +89,7 @@ int receive_file(int client_sock) {
             return -1;
     }
 
-    for(int i = 0; i < 1000; ++i){
+    for(int i = 1; i <= total_requests; ++i){
         long total_bytes_received = 0;
         int bytes_received = 0;
         while(total_bytes_received < file_size){
@@ -127,12 +127,26 @@ int receive_file(int client_sock) {
 }
 
 int main(int argc, const char** argv) {
-    if (argc != 2){
-        fprintf(stderr, "invalid arguments: must be port\n");
+    if (argc != 3) {
+        fprintf(stderr, "Invalid arguments: must be port and total requests\n");
         exit(1);
     }
-    char** temp = NULL;
-    int PORT = strtol(argv[1], temp, 10);
+
+    char *endptr = NULL;
+
+    // Convert PORT to int
+    int PORT = strtol(argv[1], &endptr, 10);
+    if (*endptr != '\0') {
+        fprintf(stderr, "Invalid PORT: %s\n", argv[1]);
+        exit(1);
+    }
+
+    // Convert total_requests to int
+    int total_requests = strtol(argv[2], &endptr, 10);
+    if (*endptr != '\0') {
+        fprintf(stderr, "Invalid total_requests: %s\n", argv[2]);
+        exit(1);
+    }
 
     int clientfd = listen_to_client(PORT);
     if (clientfd == -1){
@@ -141,7 +155,7 @@ int main(int argc, const char** argv) {
     }
     printf("Connected to client\n");
 
-    if (receive_file(clientfd) < 0) {
+    if (receive_file(clientfd, total_requests) < 0) {
             fprintf(stderr, "Failed to receive file\n");
     }
 
