@@ -228,7 +228,7 @@ int main(int argc, const char** argv){
         total_latency += latencies[i];
     }
     
-    FILE *fp = fopen("output.csv", "w"); // Open the file for writing
+    FILE *fp = fopen("output.csv", "a"); // Open the file for writing
     if (fp == NULL) {
         perror("Failed to open file");
         return -1;
@@ -238,10 +238,11 @@ int main(int argc, const char** argv){
 	Percentiles PercentileStats;
 	GetStatistics(latencies, (size_t)total_requests, &LatencyStats, &PercentileStats);
 	fprintf(fp, 
-		"Result for %d requests of %ld bytes (%.2lf microseconds):\nRPS, %.2lf\nStdErr, %.2lf\n", 
+		"Result for %d requests of %ld bytes (%.2lf microseconds, %d threads):\nRPS, %.2lf\nStdErr, %.2lf\n", 
 		total_requests,
 		(long) file_size,
 		(total_latency),
+        num_threads,
 		((size_t)total_requests / total_latency * 1000000),
 		LatencyStats.StandardError
 	);
