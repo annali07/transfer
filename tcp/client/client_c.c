@@ -224,23 +224,27 @@ int main(int argc, const char** argv){
     for (int i = 0; i < num_threads; i++) {
         pthread_join(threads[i], NULL);
     }
+    for (int i = 0; i < total_requests; i++){
+        total_latency += latencies[i];
+    }
 
 	Statistics LatencyStats;
 	Percentiles PercentileStats;
 	GetStatistics(latencies, (size_t)total_requests, &LatencyStats, &PercentileStats);
 	printf(
-		"Result for %d requests of %ld bytes (%.2lf seconds):\nRPS: %.2lf RPS\nStdErr: %.2lf\n", 
+		"Result for %d requests of %ld bytes (%.2lf microseconds):\nRPS: %.2lf RPS\nStdErr: %.2lf\n", 
 		total_requests,
 		(long) file_size,
-		(total_latency / 1000000),
+		(total_latency),
 		((size_t)total_requests / total_latency * 1000000),
 		LatencyStats.StandardError
 	);
 	switch (target_metric) {
         case 1:
-            printf("Min: %.2lf, Max: %.2lf, 50th: %.2lf, 90th: %.2lf, 99th: %.2lf, 99.9th: %.2lf, 99.99th: %.2lf\n",
+            printf("Min: %.2lf, Max: %.2lf, Avg: %.2f, 50th: %.2lf, 90th: %.2lf, 99th: %.2lf, 99.9th: %.2lf, 99.99th: %.2lf\n",
                    LatencyStats.Min,
                    LatencyStats.Max,
+                   total_latency/total_requests,
                    PercentileStats.P50,
                    PercentileStats.P90,
                    PercentileStats.P99,
@@ -254,18 +258,21 @@ int main(int argc, const char** argv){
             printf("Max: %.2lf\n", LatencyStats.Max);
             break;
         case 4:
-            printf("50th: %.2lf\n", PercentileStats.P50);
+            printf("Avg: %.2f\n", total_latency/total_requests);
             break;
         case 5:
-            printf("90th: %.2lf\n", PercentileStats.P90);
+            printf("50th: %.2lf\n", PercentileStats.P50);
             break;
         case 6:
-            printf("99th: %.2lf\n", PercentileStats.P99);
+            printf("90th: %.2lf\n", PercentileStats.P90);
             break;
         case 7:
-            printf("99.9th: %.2lf\n", PercentileStats.P99p9);
+            printf("99th: %.2lf\n", PercentileStats.P99);
             break;
         case 8:
+            printf("99.9th: %.2lf\n", PercentileStats.P99p9);
+            break;
+        case 9:
             printf("99.99th: %.2lf\n", PercentileStats.P99p99);
             break;
         default:
