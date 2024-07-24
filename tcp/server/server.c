@@ -219,7 +219,7 @@ int main(int argc, const char** argv) {
             continue;
         }
 
-        pthread_detach(thread_id); // Detach the thread to handle independently
+        pthread_detach(thread_id);
     }
 
     close(server_fd);
