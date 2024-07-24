@@ -5,10 +5,20 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <time.h>
+#include <pthread.h>
 #include "latency_helpers.h"
 
 #define PAGE_SIZE 4096 // 4 kB
 #define BILLION  1000000000L
+
+struct thread_args {
+    int sockfd;
+    int file_size;
+    char *buffer;
+    int requests_per_thread;
+    double *latencies;
+    int thread_index;
+};
 
 int connect_to_server(const char* server_ip, int port){
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -75,16 +85,45 @@ int send_file(int sock, int file_size, char *buffer) {
     return 0;
 }
 
-int main(int argc, const char** argv){
+void *send_files(void *args){
+    struct thread_args *targs = (struct thread_args *)args;
     struct timespec start, stop;
-    double latency, total_latency;
-    double *latencies;
-    int result = 0;
+    double latency;
+    int result;
+    int start_index = targs->thread_index * targs->requests_per_thread;
+
+    for(int i = 0; i < targs->requests_per_thread; i++){
+        if(clock_gettime(CLOCK_REALTIME, &start) < 0){
+            printf("clock get start time error");
+            return NULL;
+        }
+        result = send_file(targs->sockfd, targs->file_size, targs->buffer);
+        if(result < 0){
+            printf("failed to send file\n");
+            return NULL;
+        }
+        if(clock_gettime(CLOCK_REALTIME, &stop) < 0){
+            printf("clock get stop time error");
+            return NULL;
+        }
+
+        latency = (stop.tv_sec - start.tv_sec) * (double)BILLION + (double)(stop.tv_nsec - start.tv_nsec);
+        latency = latency / 1000.0;
+
+        targs->latencies[start_index + i] = latency;
+    }
+
+    close(targs->sockfd);
+    return NULL;
+}
+
+int main(int argc, const char** argv){
     
     if (argc != 7){
         fprintf(stderr, "invalid arguments: must be server ip, server port, block size, number of threads, target metrics, total requests\n");
         exit(1);
     }
+
     const char *SERVER_IP = argv[1];
     char *endptr = NULL;
 
@@ -92,7 +131,7 @@ int main(int argc, const char** argv){
     int SERVER_PORT = strtol(argv[2], &endptr, 10);
     if (*endptr != '\0') {
         fprintf(stderr, "Invalid SERVER_PORT: %s\n", argv[2]);
-        return EXIT_FAILURE;
+        exit(1);
     }
 
     // Convert file_size to long int
@@ -122,85 +161,97 @@ int main(int argc, const char** argv){
         fprintf(stderr, "Invalid total_requests: %s\n", argv[6]);
         return EXIT_FAILURE;
     }
-    
+    // End of Args
+
+    // Begin Server Connection
+
     char *buffer;
+    pthread_t threads[num_threads];
+    struct thread_args targs[num_threads];
+    double *latencies;
+    double total_latency = 0;
 
-    int sockfd =  connect_to_server(SERVER_IP, SERVER_PORT);
-    if (sockfd == -1){
-        return -1;
-    }
-
-    // Check file size limit
-    if (file_size < 8 || file_size > 1048576) {
-        fprintf(stderr, "File size is out of the expected range (8B to 1024kB)\n");
-        close(sockfd);
-        return -1;
-    }
-
-    // Send file size to the server
-    if (send(sockfd, &file_size, sizeof(file_size), 0) < 0) {
-        printf("Failed to send file size");
-        close(sockfd);
-        return -1;
-    }
-    printf("File size sent success\n");
-    
     buffer = malloc(file_size+1);
     if (!buffer) {
         perror("Failed to allocate buffer");
-        close(sockfd);
         return -1;
     }
 
-    // Start Timing 
-    total_latency = 0;
+    // Threads
     latencies = malloc(sizeof(double) * total_requests);
-    for (size_t i = 0; i != total_requests; i++) {
-	     latencies[i] = 0;
-	}
+    if (!latencies) {
+        perror("Failed to allocate buffer");
+        return -1;
+    }
 
     for (int i = 0; i < total_requests; i++) {
+        latencies[i] = 0;
+    }
 
-		if(clock_gettime(CLOCK_REALTIME, &start) == -1) {
-			perror("clock gettime");
-			return -1;
-		}
-		result = send_file(sockfd, file_size, buffer);
-		
-        if (result < 0) {
-			printf("failed to send file");
-			return -1;
-		}
+    int requests_per_thread = total_requests / num_threads;
+
+    // Concurrency
+    for (int i = 0; i < num_threads; i++) {
+        int sockfd = connect_to_server(SERVER_IP, SERVER_PORT);
+        if (sockfd == -1){
+            return -1;
+        }
         
-		if(clock_gettime( CLOCK_REALTIME, &stop) == -1) {
-			perror("clock gettime");
-			return -1;
-		}
+        // Check file size limit
+        if (file_size < 8 || file_size > 1048576) {
+            fprintf(stderr, "File size is out of the expected range (8B to 1024kB)\n");
+            close(sockfd);
+            return -1;
+        }
 
-		latency = (stop.tv_sec - start.tv_sec) * (double)BILLION
-			     + (double)(stop.tv_nsec - start.tv_nsec);
-		latency = latency / 1000.0;
+        // Send file size to the server
+        if (send(sockfd, &file_size, sizeof(file_size), 0) < 0) {
+            printf("Failed to send file size");
+            close(sockfd);
+            return -1;
+        }
+        printf("File size sent success\n");
+        
+        targs[i].sockfd = sockfd;
+        targs[i].file_size = file_size;
+        targs[i].buffer = buffer;
+        targs[i].requests_per_thread = requests_per_thread;
+        targs[i].latencies = latencies;
+        targs[i].thread_index = i;
+        pthread_create(&threads[i], NULL, send_files, (void *)&targs[i]);
+    }
 
-		latencies[i] = latency;
-		total_latency += latency;
-	}
+    for (int i = 0; i < num_threads; i++) {
+        pthread_join(threads[i], NULL);
+    }
+    for (int i = 0; i < total_requests; i++){
+        total_latency += latencies[i];
+    }
+    
+    FILE *fp = fopen("output.csv", "w"); // Open the file for writing
+    if (fp == NULL) {
+        perror("Failed to open file");
+        return -1;
+    }
 
 	Statistics LatencyStats;
 	Percentiles PercentileStats;
 	GetStatistics(latencies, (size_t)total_requests, &LatencyStats, &PercentileStats);
-	printf(
-		"Result for %d requests of %ld bytes (%.2lf seconds):\nRPS: %.2lf RPS\nStdErr: %.2lf\n", 
+	fprintf(fp, 
+		"Result for %d requests of %ld bytes (%.2lf microseconds):\nRPS, %.2lf\nStdErr, %.2lf\n", 
 		total_requests,
 		(long) file_size,
-		(total_latency / 1000000),
+		(total_latency),
 		((size_t)total_requests / total_latency * 1000000),
 		LatencyStats.StandardError
 	);
+
 	switch (target_metric) {
         case 1:
-            printf("Min: %.2lf, Max: %.2lf, 50th: %.2lf, 90th: %.2lf, 99th: %.2lf, 99.9th: %.2lf, 99.99th: %.2lf\n",
+            fprintf(fp, "Min, %.2lf\nMax, %.2lf\nAvg, %.2f\n50th, %.2lf\n90th, %.2lf\n99th, %.2lf\n99.9th, %.2lf\n99.99th, %.2lf\n",
                    LatencyStats.Min,
                    LatencyStats.Max,
+                   total_latency/total_requests,
                    PercentileStats.P50,
                    PercentileStats.P90,
                    PercentileStats.P99,
@@ -208,31 +259,34 @@ int main(int argc, const char** argv){
                    PercentileStats.P99p99);
             break;
         case 2:
-            printf("Min: %.2lf\n", LatencyStats.Min);
+            fprintf(fp, "Min: %.2lf\n", LatencyStats.Min);
             break;
         case 3:
-            printf("Max: %.2lf\n", LatencyStats.Max);
+            fprintf(fp, "Max: %.2lf\n", LatencyStats.Max);
             break;
         case 4:
-            printf("50th: %.2lf\n", PercentileStats.P50);
+            fprintf(fp, "Avg: %.2f\n", total_latency/total_requests);
             break;
         case 5:
-            printf("90th: %.2lf\n", PercentileStats.P90);
+            fprintf(fp, "50th: %.2lf\n", PercentileStats.P50);
             break;
         case 6:
-            printf("99th: %.2lf\n", PercentileStats.P99);
+            fprintf(fp, "90th: %.2lf\n", PercentileStats.P90);
             break;
         case 7:
-            printf("99.9th: %.2lf\n", PercentileStats.P99p9);
+            fprintf(fp, "99th: %.2lf\n", PercentileStats.P99);
             break;
         case 8:
-            printf("99.99th: %.2lf\n", PercentileStats.P99p99);
+            fprintf(fp, "99.9th: %.2lf\n", PercentileStats.P99p9);
+            break;
+        case 9:
+            fprintf(fp, "99.99th: %.2lf\n", PercentileStats.P99p99);
             break;
         default:
-            printf("Invalid target metric.\n");
+            fprintf(fp, "Invalid target metric.\n");
             break;
     }
+    fclose(fp);
 	free(latencies);
-    close(sockfd);
     return 0;
 }

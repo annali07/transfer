@@ -7,11 +7,19 @@
 #include <string.h>
 #include <fcntl.h>
 #include <time.h>
+#include <pthread.h>
 #include <sys/times.h>
 #include <sys/time.h>
 
 #define PAGE_SIZE 4096 // 4 kB
 #define MAX_FILE_SIZE 1048576 // Maximum file size is 1024kB
+
+struct thread_args {
+    int client_sock;
+    int total_requests;
+};
+
+void *handle_client(void *args);
 
 int listen_to_client(int port){
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -39,21 +47,13 @@ int listen_to_client(int port){
         return -1;
     }
 
-    if (listen(server_fd, 3) < 0) {
+    if (listen(server_fd, 10) < 0) { // Listen for up to 10 connections
         fprintf(stderr, "Error listening for connections\n");
         close(server_fd);
         return -1;
     }
 
-    int sockfd = accept(server_fd, (struct sockaddr *)&addr, (socklen_t*)&addrlen);
-    if (sockfd < 0) {
-        fprintf(stderr, "Error in accepting\n");
-        close(server_fd);
-        return -1;
-    }
-
-    close(server_fd);
-    return sockfd;
+    return server_fd;
 }
 
 int send_success_message(int client_sock) {
@@ -78,15 +78,15 @@ int receive_file(int client_sock, int total_requests) {
 
     if (file_size < 8 || file_size > MAX_FILE_SIZE) {
         printf("file size %ld\n", file_size);
-            fprintf(stderr, "Received file size is out of the expected range (1kB to 1024kB)\n");
+        fprintf(stderr, "Received file size is out of the expected range (1kB to 1024kB)\n");
         return -1;
     }
     printf("Received file size: %ld\n", file_size);
     
     char* buffer = malloc(PAGE_SIZE);
-        if (!buffer) {
-            perror("Failed to allocate buffer");
-            return -1;
+    if (!buffer) {
+        perror("Failed to allocate buffer");
+        return -1;
     }
 
     for(int i = 1; i <= total_requests; ++i){
@@ -105,30 +105,46 @@ int receive_file(int client_sock, int total_requests) {
                 return -1;
             }
             total_bytes_received += bytes_received;
-            //printf("%ld\n", total_bytes_received);
         }
-        //printf("final bytes %ld\n", total_bytes_received);
 
         if (total_bytes_received != file_size) {
             fprintf(stderr, "Mismatch in the file size received and expected\n");
-                return -1;
+            free(buffer);
+            return -1;
         } else {
-            //printf("File received successfully, total bytes: %ld\n", total_bytes_received);
             if (send_success_message(client_sock) < 0) {
+                free(buffer);
                 return -1;  // handle error appropriately
             }
         }
-        if (i%10 == 0){
-                printf("%d/100\n", i/10);
+        if (i % 10 == 0){
+            printf("%d/100\n", i / 10);
         }
     }
     free(buffer);
     return 0;
 }
 
+void *handle_client(void *args) {
+    struct thread_args *targs = (struct thread_args *)args;
+    int client_sock = targs->client_sock;
+    int total_requests = targs->total_requests;
+    free(targs);
+
+    printf("Connected to client\n");
+
+    if (receive_file(client_sock, total_requests) < 0) {
+        fprintf(stderr, "Failed to receive file\n");
+    }
+
+    close(client_sock);
+    return NULL;
+}
+
 int main(int argc, const char** argv) {
-    if (argc != 3) {
-        fprintf(stderr, "Invalid arguments: must be port and total requests\n");
+    
+    if (argc != 4) {
+        fprintf(stderr, "Invalid arguments: must be port and total requests and number of threads.\n");
         exit(1);
     }
 
@@ -148,17 +164,64 @@ int main(int argc, const char** argv) {
         exit(1);
     }
 
-    int clientfd = listen_to_client(PORT);
-    if (clientfd == -1){
+    // Convert total_requests to int
+    int num_of_threads = strtol(argv[3], &endptr, 10);
+    if (*endptr != '\0') {
+        fprintf(stderr, "Invalid number of threads: %s\n", argv[2]);
+        exit(1);
+    }
+
+    int server_fd = listen_to_client(PORT);
+    if (server_fd == -1){
         fprintf(stderr, "Error listening to client\n");
         return -1;
     }
-    printf("Connected to client\n");
 
-    if (receive_file(clientfd, total_requests) < 0) {
-            fprintf(stderr, "Failed to receive file\n");
+    printf("Server is listening on port %d\n", PORT);
+
+    
+    int total = 0;
+    while (1) {
+        struct sockaddr_in addr;
+        int addrlen = sizeof(addr);
+
+        int *client_sock = malloc(sizeof(int));
+        if (client_sock == NULL) {
+            perror("Failed to allocate memory for client socket");
+            continue;
+        }
+        
+        *client_sock = accept(server_fd, (struct sockaddr *)&addr, (socklen_t*)&addrlen);
+        if (*client_sock < 0) {
+            perror("Error accepting connection");
+            free(client_sock);
+            continue;
+        }
+
+        pthread_t thread_id;
+        struct thread_args *targs = malloc(sizeof(struct thread_args));
+        if (targs == NULL) {
+            perror("Failed to allocate memory for thread arguments");
+            close(*client_sock);
+            free(client_sock);
+            continue;
+        }
+        
+        targs->client_sock = *client_sock;
+        targs->total_requests = total_requests/num_of_threads;
+        printf("The %dth thread\n", total);
+        total++;
+        
+        if (pthread_create(&thread_id, NULL, handle_client, (void *)targs) != 0) {
+            perror("Failed to create thread");
+            close(targs->client_sock);
+            free(targs);
+            continue;
+        }
+
+        pthread_detach(thread_id); // Detach the thread to handle independently
     }
 
-    close(clientfd);
+    close(server_fd);
     return 0;
 }
