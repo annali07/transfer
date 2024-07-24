@@ -227,21 +227,28 @@ int main(int argc, const char** argv){
     for (int i = 0; i < total_requests; i++){
         total_latency += latencies[i];
     }
+    
+    FILE *fp = fopen("output.csv", "w"); // Open the file for writing
+    if (fp == NULL) {
+        perror("Failed to open file");
+        return -1;
+    }
 
 	Statistics LatencyStats;
 	Percentiles PercentileStats;
 	GetStatistics(latencies, (size_t)total_requests, &LatencyStats, &PercentileStats);
-	printf(
-		"Result for %d requests of %ld bytes (%.2lf microseconds):\nRPS: %.2lf RPS\nStdErr: %.2lf\n", 
+	fprintf(fp, 
+		"Result for %d requests of %ld bytes (%.2lf microseconds):\nRPS, %.2lf\nStdErr, %.2lf\n", 
 		total_requests,
 		(long) file_size,
 		(total_latency),
 		((size_t)total_requests / total_latency * 1000000),
 		LatencyStats.StandardError
 	);
+
 	switch (target_metric) {
         case 1:
-            printf("Min: %.2lf, Max: %.2lf, Avg: %.2f, 50th: %.2lf, 90th: %.2lf, 99th: %.2lf, 99.9th: %.2lf, 99.99th: %.2lf\n",
+            fprintf(fp, "Min, %.2lf\nMax, %.2lf\nAvg, %.2f\n50th, %.2lf\n90th, %.2lf\n99th, %.2lf\n99.9th, %.2lf\n99.99th, %.2lf\n",
                    LatencyStats.Min,
                    LatencyStats.Max,
                    total_latency/total_requests,
@@ -252,33 +259,34 @@ int main(int argc, const char** argv){
                    PercentileStats.P99p99);
             break;
         case 2:
-            printf("Min: %.2lf\n", LatencyStats.Min);
+            fprintf(fp, "Min: %.2lf\n", LatencyStats.Min);
             break;
         case 3:
-            printf("Max: %.2lf\n", LatencyStats.Max);
+            fprintf(fp, "Max: %.2lf\n", LatencyStats.Max);
             break;
         case 4:
-            printf("Avg: %.2f\n", total_latency/total_requests);
+            fprintf(fp, "Avg: %.2f\n", total_latency/total_requests);
             break;
         case 5:
-            printf("50th: %.2lf\n", PercentileStats.P50);
+            fprintf(fp, "50th: %.2lf\n", PercentileStats.P50);
             break;
         case 6:
-            printf("90th: %.2lf\n", PercentileStats.P90);
+            fprintf(fp, "90th: %.2lf\n", PercentileStats.P90);
             break;
         case 7:
-            printf("99th: %.2lf\n", PercentileStats.P99);
+            fprintf(fp, "99th: %.2lf\n", PercentileStats.P99);
             break;
         case 8:
-            printf("99.9th: %.2lf\n", PercentileStats.P99p9);
+            fprintf(fp, "99.9th: %.2lf\n", PercentileStats.P99p9);
             break;
         case 9:
-            printf("99.99th: %.2lf\n", PercentileStats.P99p99);
+            fprintf(fp, "99.99th: %.2lf\n", PercentileStats.P99p99);
             break;
         default:
-            printf("Invalid target metric.\n");
+            fprintf(fp, "Invalid target metric.\n");
             break;
     }
+    fclose(fp);
 	free(latencies);
     return 0;
 }
