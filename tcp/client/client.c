@@ -237,15 +237,34 @@ int main(int argc, const char** argv){
 	Statistics LatencyStats;
 	Percentiles PercentileStats;
 	GetStatistics(latencies, (size_t)total_requests, &LatencyStats, &PercentileStats);
-	fprintf(fp, 
-		"Result for %d requests of %ld bytes (%.2lf microseconds, %d threads):\nRPS, %.2lf\nStdErr, %.2lf\n", 
-		total_requests,
-		(long) file_size,
-		(total_latency),
-        num_threads,
-		((size_t)total_requests / total_latency * 1000000),
-		LatencyStats.StandardError
-	);
+	// fprintf(fp, 
+	// 	"Result for %d requests of %ld bytes (%.2lf microseconds, %d threads):\nRPS, %.2lf\nStdErr, %.2lf\n", 
+		// total_requests,
+	// 	(long) file_size,
+	// 	(total_latency),
+    //     num_threads,
+	// 	((size_t)total_requests / total_latency * 1000000),
+	// 	LatencyStats.StandardError
+	// );
+
+    int ch = fgetc(file);
+    if (ch == EOF) {
+        fprintf(fp,"requests, bytes, threads, RPS, StdErr, Min, Max, Avg, 50th, 90th, 99th, 99.9th, 99.99th\n");
+    } 
+    fprintf(fp,  "%d, %ld, %d, %.2lf, %.2lf, %.2lf, %.2lf, %.2f, %.2lf, %.2lf, %.2lf, %.2lf, %.2lf,",
+                    total_requests
+                    (long) file_size,
+                     num_threads,
+                     ((size_t)total_requests / total_latency * 1000000),
+		            LatencyStats.StandardError,
+                    LatencyStats.Min,
+                    LatencyStats.Max,
+                    total_latency/total_requests,
+                    PercentileStats.P50,
+                    PercentileStats.P90,
+                    PercentileStats.P99,
+                    PercentileStats.P99p9,
+                    PercentileStats.P99p99)
 
 	switch (target_metric) {
         case 1:
