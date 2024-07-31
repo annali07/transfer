@@ -239,7 +239,7 @@ int main(int argc, const char** argv){
 	GetStatistics(latencies, (size_t)total_requests, &LatencyStats, &PercentileStats);
 	// fprintf(fp, 
 	// 	"Result for %d requests of %ld bytes (%.2lf microseconds, %d threads):\nRPS, %.2lf\nStdErr, %.2lf\n", 
-		// total_requests,
+	// 	total_requests,
 	// 	(long) file_size,
 	// 	(total_latency),
     //     num_threads,
@@ -247,12 +247,24 @@ int main(int argc, const char** argv){
 	// 	LatencyStats.StandardError
 	// );
 
-    int ch = fgetc(file);
-    if (ch == EOF) {
-        fprintf(fp,"requests, bytes, threads, RPS, StdErr, Min, Max, Avg, 50th, 90th, 99th, 99.9th, 99.99th\n");
-    } 
-    fprintf(fp,  "%d, %ld, %d, %.2lf, %.2lf, %.2lf, %.2lf, %.2f, %.2lf, %.2lf, %.2lf, %.2lf, %.2lf,",
-                    total_requests
+    fseek(fp, 0, SEEK_END); // Move to the end of the file
+    if (ftell(fp) == 0) {   // If the file size is 0, it's empty
+        fprintf(fp, "requests, bytes, threads, RPS, StdErr, Min, Max, Avg, 50th, 90th, 99th, 99.9th, 99.99th\n");
+    }
+
+	switch (target_metric) {
+        case 1:
+            // fprintf(fp, "Min, %.2lf\nMax, %.2lf\nAvg, %.2f\n50th, %.2lf\n90th, %.2lf\n99th, %.2lf\n99.9th, %.2lf\n99.99th, %.2lf\n",
+            //        LatencyStats.Min,
+            //        LatencyStats.Max,
+            //        total_latency/total_requests,
+            //        PercentileStats.P50,
+            //        PercentileStats.P90,
+            //        PercentileStats.P99,
+            //        PercentileStats.P99p9,
+            //        PercentileStats.P99p99);
+            fprintf(fp,  "%d, %ld, %d, %.2lf, %.2lf, %.2lf, %.2lf, %.2f, %.2lf, %.2lf, %.2lf, %.2lf, %.2lf\n",
+                    total_requests,
                     (long) file_size,
                      num_threads,
                      ((size_t)total_requests / total_latency * 1000000),
@@ -264,19 +276,7 @@ int main(int argc, const char** argv){
                     PercentileStats.P90,
                     PercentileStats.P99,
                     PercentileStats.P99p9,
-                    PercentileStats.P99p99)
-
-	switch (target_metric) {
-        case 1:
-            fprintf(fp, "Min, %.2lf\nMax, %.2lf\nAvg, %.2f\n50th, %.2lf\n90th, %.2lf\n99th, %.2lf\n99.9th, %.2lf\n99.99th, %.2lf\n",
-                   LatencyStats.Min,
-                   LatencyStats.Max,
-                   total_latency/total_requests,
-                   PercentileStats.P50,
-                   PercentileStats.P90,
-                   PercentileStats.P99,
-                   PercentileStats.P99p9,
-                   PercentileStats.P99p99);
+                    PercentileStats.P99p99);
             break;
         case 2:
             fprintf(fp, "Min: %.2lf\n", LatencyStats.Min);
