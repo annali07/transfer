@@ -119,8 +119,8 @@ void *send_files(void *args){
 
 int main(int argc, const char** argv){
     
-    if (argc != 7){
-        fprintf(stderr, "invalid arguments: must be server ip, server port, block size, number of threads, target metrics, total requests\n");
+    if (argc != 8){
+        fprintf(stderr, "invalid arguments: must be server ip, server port, block size, number of threads, total requests\n");
         exit(1);
     }
 
@@ -158,9 +158,12 @@ int main(int argc, const char** argv){
     // Convert total_requests to int
     int total_requests = strtol(argv[6], &endptr, 10);
     if (*endptr != '\0') {
-        fprintf(stderr, "Invalid total_requests: %s\n", argv[6]);
+        fprintf(stderr, "Invalid total_requests: %s\n", argv[5]);
         return EXIT_FAILURE;
     }
+
+    // Output Folder
+    char *output_file = argv[7];
     // End of Args
 
     // Begin Server Connection
@@ -228,7 +231,7 @@ int main(int argc, const char** argv){
         total_latency += latencies[i];
     }
     
-    FILE *fp = fopen("output.csv", "a"); // Open the file for writing
+    FILE *fp = fopen(output_file, "a"); // Open the file for writing
     if (fp == NULL) {
         perror("Failed to open file");
         return -1;

@@ -218,7 +218,6 @@ int main(int argc, const char** argv) {
             free(targs);
             continue;
         }
-
     }
 
     close(server_fd);
